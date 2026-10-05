@@ -1,39 +1,36 @@
-import os
+import sqlite3
 from datetime import datetime, timezone
 
-import psycopg2
-from dotenv import load_dotenv
 
-load_dotenv()
-
-DATABASE_URL = os.getenv("DATABASE_URL")
+DB_NAME = "bot.db"
 
 
 def get_connection():
-    return psycopg2.connect(DATABASE_URL)
+    return sqlite3.connect(DB_NAME)
 
 
 def initialize_database():
     conn = get_connection()
     cursor = conn.cursor()
 
+    # Channels that count as update channels
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS update_channels (
-            channel_id BIGINT PRIMARY KEY,
+            channel_id INTEGER PRIMARY KEY,
             channel_name TEXT NOT NULL
         )
     """)
 
+    # Last update for each user
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
-            user_id BIGINT PRIMARY KEY,
+            user_id INTEGER PRIMARY KEY,
             last_update TEXT NOT NULL,
             last_reminder TEXT
         )
     """)
 
     conn.commit()
-    cursor.close()
     conn.close()
 
 
@@ -42,14 +39,12 @@ def add_update_channel(channel_id, channel_name):
     cursor = conn.cursor()
 
     cursor.execute("""
-        INSERT INTO update_channels (channel_id, channel_name)
-        VALUES (%s, %s)
-        ON CONFLICT (channel_id)
-        DO UPDATE SET channel_name = EXCLUDED.channel_name
+        INSERT OR REPLACE INTO update_channels
+        (channel_id, channel_name)
+        VALUES (?, ?)
     """, (channel_id, channel_name))
 
     conn.commit()
-    cursor.close()
     conn.close()
 
 
@@ -57,13 +52,12 @@ def remove_update_channel(channel_id):
     conn = get_connection()
     cursor = conn.cursor()
 
-    cursor.execute(
-        "DELETE FROM update_channels WHERE channel_id = %s",
-        (channel_id,)
-    )
+    cursor.execute("""
+        DELETE FROM update_channels
+        WHERE channel_id = ?
+    """, (channel_id,))
 
     conn.commit()
-    cursor.close()
     conn.close()
 
 
@@ -71,36 +65,37 @@ def is_update_channel(channel_id):
     conn = get_connection()
     cursor = conn.cursor()
 
-    cursor.execute(
-        "SELECT 1 FROM update_channels WHERE channel_id = %s",
-        (channel_id,)
-    )
+    cursor.execute("""
+        SELECT 1
+        FROM update_channels
+        WHERE channel_id = ?
+    """, (channel_id,))
 
     result = cursor.fetchone()
 
-    cursor.close()
     conn.close()
 
     return result is not None
 
 
 def record_update(user_id):
-    now = datetime.now(timezone.utc).isoformat()
-
     conn = get_connection()
     cursor = conn.cursor()
 
+    now = datetime.now(timezone.utc).isoformat()
+
     cursor.execute("""
-        INSERT INTO users (user_id, last_update, last_reminder)
-        VALUES (%s, %s, NULL)
-        ON CONFLICT (user_id)
+        INSERT INTO users
+            (user_id, last_update, last_reminder)
+        VALUES (?, ?, NULL)
+
+        ON CONFLICT(user_id)
         DO UPDATE SET
-            last_update = EXCLUDED.last_update,
+            last_update = excluded.last_update,
             last_reminder = NULL
     """, (user_id, now))
 
     conn.commit()
-    cursor.close()
     conn.close()
 
 
@@ -115,26 +110,24 @@ def get_users():
 
     users = cursor.fetchall()
 
-    cursor.close()
     conn.close()
 
     return users
 
 
 def mark_reminded(user_id):
-    now = datetime.now(timezone.utc).isoformat()
-
     conn = get_connection()
     cursor = conn.cursor()
 
+    now = datetime.now(timezone.utc).isoformat()
+
     cursor.execute("""
         UPDATE users
-        SET last_reminder = %s
-        WHERE user_id = %s
+        SET last_reminder = ?
+        WHERE user_id = ?
     """, (now, user_id))
 
     conn.commit()
-    cursor.close()
     conn.close()
 
 
@@ -149,7 +142,6 @@ def get_update_channels():
 
     channels = cursor.fetchall()
 
-    cursor.close()
     conn.close()
 
     return channels
